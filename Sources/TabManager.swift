@@ -2676,6 +2676,11 @@ class TabManager: ObservableObject {
             return
         }
 
+        guard !workspace.isRemoteWorkspace else {
+            clearTrackedWorkspaceGitState(for: key)
+            return
+        }
+
         guard workspace.terminalPanel(for: panelId) != nil else {
             clearWorkspaceGitProbe(key)
             detachWorkspaceGitEventWatcher(for: key)
@@ -3078,6 +3083,14 @@ class TabManager: ObservableObject {
     ) {
         let normalizedDirectory = normalizeDirectory(directory)
         let key = WorkspaceGitProbeKey(workspaceId: workspaceId, panelId: panelId)
+        guard tabs.contains(where: {
+            $0.id == workspaceId
+                && $0.panels[panelId] != nil
+                && !$0.isRemoteWorkspace
+        }) else {
+            clearTrackedWorkspaceGitState(for: key)
+            return
+        }
         cancelWorkspaceGitProbeTimers(for: key)
         if workspaceGitProbeStateByKey[key] == nil {
             workspaceGitProbeStateByKey[key] = .idle
@@ -3151,6 +3164,13 @@ class TabManager: ObservableObject {
         cancelWorkspaceGitProbeTimers(for: key)
     }
 
+    private func clearTrackedWorkspaceGitState(for key: WorkspaceGitProbeKey) {
+        clearWorkspaceGitProbe(key)
+        detachWorkspaceGitEventWatcher(for: key)
+        workspaceGitTrackedDirectoryByKey.removeValue(forKey: key)
+        clearWorkspacePullRequestTracking(for: key)
+    }
+
     private func clearWorkspaceGitProbes(workspaceId: UUID) {
         let keys = Set(workspaceGitProbeStateByKey.keys.filter { $0.workspaceId == workspaceId })
             .union(workspaceGitProbeTimersByKey.keys.filter { $0.workspaceId == workspaceId })
@@ -3207,6 +3227,11 @@ class TabManager: ObservableObject {
         guard workspace.panels[probeKey.panelId] != nil else {
             clearWorkspaceGitProbe(probeKey)
             detachWorkspaceGitEventWatcher(for: probeKey)
+            didClearProbe = true
+            return
+        }
+        guard !workspace.isRemoteWorkspace else {
+            clearTrackedWorkspaceGitState(for: probeKey)
             didClearProbe = true
             return
         }
