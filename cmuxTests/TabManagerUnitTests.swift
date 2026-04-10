@@ -446,6 +446,41 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
         XCTAssertFalse(TabManager.workspacePullRequestRefreshAllowsRepoCache(reason: "commandHint:merge"))
     }
 
+    func testWorkspacePullRequestRefreshAllowsRepoCacheForTimerReasons() {
+        XCTAssertTrue(TabManager.workspacePullRequestRefreshAllowsRepoCache(reason: "timer"))
+        XCTAssertTrue(TabManager.workspacePullRequestRefreshAllowsRepoCache(reason: "timer.followUp"))
+    }
+
+    func testWorkspacePullRequestShouldRefreshHonorsScheduledPollsAndTerminalSweeps() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let recentTerminalRefresh = now.addingTimeInterval(-60)
+
+        XCTAssertTrue(
+            TabManager.shouldRefreshWorkspacePullRequestForTesting(
+                now: now,
+                nextPollAt: .distantPast,
+                lastTerminalStateRefreshAt: recentTerminalRefresh,
+                currentPullRequestStatus: .merged
+            )
+        )
+        XCTAssertFalse(
+            TabManager.shouldRefreshWorkspacePullRequestForTesting(
+                now: now,
+                nextPollAt: now.addingTimeInterval(60),
+                lastTerminalStateRefreshAt: recentTerminalRefresh,
+                currentPullRequestStatus: .closed
+            )
+        )
+        XCTAssertFalse(
+            TabManager.shouldRefreshWorkspacePullRequestForTesting(
+                now: now,
+                nextPollAt: now.addingTimeInterval(60),
+                lastTerminalStateRefreshAt: nil,
+                currentPullRequestStatus: .open
+            )
+        )
+    }
+
     func testWorkspacePullRequestRefreshThrottlesKnownAbsentBranchWithinCacheLifetime() {
         XCTAssertFalse(
             TabManager.shouldRefreshKnownAbsentWorkspacePullRequestForTesting(
@@ -787,6 +822,63 @@ final class TabManagerPullRequestProbeTests: XCTestCase {
         )
         XCTAssertTrue(workspace.sidebarGitBranchesInDisplayOrder().isEmpty)
         XCTAssertTrue(workspace.sidebarPullRequestsInDisplayOrder().isEmpty)
+    }
+
+    func testGlobalGitMetadataWatcherDisablePreservesRemoteWorkspaceMetadata() throws {
+        let defaults = UserDefaults.standard
+        let originalSetting = defaults.object(forKey: GitMetadataWatcherSettings.disabledKey)
+        defer {
+            if let originalSetting {
+                defaults.set(originalSetting, forKey: GitMetadataWatcherSettings.disabledKey)
+            } else {
+                defaults.removeObject(forKey: GitMetadataWatcherSettings.disabledKey)
+            }
+        }
+
+        defaults.set(false, forKey: GitMetadataWatcherSettings.disabledKey)
+
+        let manager = TabManager()
+        guard let workspace = manager.selectedWorkspace,
+              let panelId = workspace.focusedPanelId else {
+            XCTFail("Expected selected workspace with focused panel")
+            return
+        }
+
+        workspace.configureRemoteConnection(
+            WorkspaceRemoteConfiguration(
+                destination: "cmux-macmini",
+                port: nil,
+                identityFile: nil,
+                sshOptions: [],
+                localProxyPort: nil,
+                relayPort: 64017,
+                relayID: String(repeating: "a", count: 16),
+                relayToken: String(repeating: "b", count: 64),
+                localSocketPath: "/tmp/cmux-debug-test.sock",
+                terminalStartupCommand: "ssh cmux-macmini"
+            ),
+            autoConnect: false
+        )
+        drainMainQueue()
+        XCTAssertTrue(workspace.isRemoteWorkspace)
+
+        workspace.updatePanelGitBranch(panelId: panelId, branch: "feature/remote", isDirty: false)
+        workspace.updatePanelPullRequest(
+            panelId: panelId,
+            number: 3001,
+            label: "PR",
+            url: try XCTUnwrap(URL(string: "https://github.com/manaflow-ai/cmux/pull/3001")),
+            status: .open,
+            branch: "feature/remote"
+        )
+
+        defaults.set(true, forKey: GitMetadataWatcherSettings.disabledKey)
+        manager.handleGitMetadataWatcherDefaultsChangeForTesting()
+
+        XCTAssertEqual(workspace.panelGitBranches[panelId]?.branch, "feature/remote")
+        XCTAssertEqual(workspace.panelPullRequests[panelId]?.number, 3001)
+        XCTAssertEqual(workspace.gitBranch?.branch, "feature/remote")
+        XCTAssertEqual(workspace.pullRequest?.number, 3001)
     }
 
     func testGlobalGitMetadataWatcherDisableClearsSidebarMetadataFromDefaultsChange() throws {

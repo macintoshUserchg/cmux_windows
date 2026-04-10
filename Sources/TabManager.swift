@@ -2056,6 +2056,20 @@ class TabManager: ObservableObject {
         )
     }
 
+    nonisolated static func shouldRefreshWorkspacePullRequestForTesting(
+        now: Date,
+        nextPollAt: Date?,
+        lastTerminalStateRefreshAt: Date?,
+        currentPullRequestStatus: SidebarPullRequestStatus?
+    ) -> Bool {
+        shouldRefreshWorkspacePullRequest(
+            now: now,
+            nextPollAt: nextPollAt,
+            lastTerminalStateRefreshAt: lastTerminalStateRefreshAt,
+            currentPullRequestStatus: currentPullRequestStatus
+        )
+    }
+
     nonisolated static func workspacePullRequestRefreshAllowsRepoCache(reason _: String) -> Bool {
         // Git-triggered PR refreshes need fresh repository data. Reusing recent
         // GitHub results here can leave merged/closed state stale in the sidebar.
